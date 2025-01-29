@@ -2,12 +2,9 @@ from capstone import *
 from keystone import *
 from .base_pass import *
 from capstone.x86_const import *
-from triton import *
-
 
 
 class DSEPass(BasePass):
-    ctx = TritonContext(ARCH.X86)
 
     def match_instructions(self, insns: List[CsInsn]):
         matches = []
