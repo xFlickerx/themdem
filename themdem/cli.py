@@ -76,6 +76,52 @@ def build_parser() -> argparse.ArgumentParser:
     )
     raw.add_argument("-v", "--verbose", action="store_true", help="Print pass reduction stats.")
 
+    # -- detect --------------------------------------------------------------
+    det = sub.add_parser(
+        "detect",
+        help="Statically detect Themida/WinLicense protection and VM bytecode "
+        "regions in a PE.",
+    )
+    det.add_argument("binary", help="Path to the PE file.")
+
+    # -- devirt --------------------------------------------------------------
+    dv = sub.add_parser(
+        "devirt",
+        help="Analyse a virtualized function: recover VPC-sensitive CFG, "
+        "classify handlers, and (with a VM spec) disassemble + lift it.",
+    )
+    dv.add_argument("binary", help="Path to the PE file (or use --raw-segment).")
+    dv.add_argument(
+        "--vm-entry",
+        type=_parse_int,
+        required=True,
+        metavar="VA",
+        help="Virtual address where the VM interpreter starts.",
+    )
+    dv.add_argument(
+        "--bytecode",
+        required=True,
+        metavar="START:SIZE",
+        help="VM bytecode region as VA:size, e.g. 0x500000:0x40.",
+    )
+    dv.add_argument(
+        "--reg",
+        action="append",
+        default=[],
+        metavar="NAME=VALUE",
+        help="Initial register value, e.g. --reg esi=0x500000 (repeatable).",
+    )
+    dv.add_argument(
+        "--arch",
+        choices=["example"],
+        help="Named VM architecture spec to disassemble with. Omit for "
+        "structure-only recovery (handler classification).",
+    )
+    dv.add_argument(
+        "--max-steps", type=_parse_int, default=200_000, help="Emulation step budget."
+    )
+    dv.add_argument("--dot", help="Write the recovered CFG to this Graphviz .dot file.")
+
     return parser
 
 
@@ -125,6 +171,48 @@ def _run_raw(args: argparse.Namespace) -> int:
     return 0
 
 
+def _run_detect(args: argparse.Namespace) -> int:
+    from .devirt import analyze
+
+    result = analyze(args.binary)
+    print(result.summary())
+    return 0
+
+
+def _run_devirt(args: argparse.Namespace) -> int:
+    from .devirt import Devirtualizer, Range
+
+    start_str, _, size_str = args.bytecode.partition(":")
+    if not size_str:
+        raise ValueError("--bytecode must be START:SIZE, e.g. 0x500000:0x40")
+    start = int(start_str, 0)
+    size = int(size_str, 0)
+    bytecode = Range(start, start + size)
+
+    reg_init = {}
+    for item in args.reg:
+        name, _, value = item.partition("=")
+        if not value:
+            raise ValueError(f"--reg expects NAME=VALUE, got {item!r}")
+        reg_init[name.strip().lower()] = int(value, 0)
+
+    arch = None
+    if args.arch == "example":
+        from .devirt import STACK_VM_EXAMPLE
+
+        arch = STACK_VM_EXAMPLE
+
+    deob = Devirtualizer.from_pe(args.binary, arch=arch, reg_init=reg_init)
+    result = deob.run(args.vm_entry, bytecode, max_steps=args.max_steps)
+    print(result.report())
+
+    if args.dot:
+        with open(args.dot, "w") as fh:
+            fh.write(result.cfg.to_dot())
+        print(f"\n[+] CFG written to {args.dot}")
+    return 0
+
+
 def _print_result(va: int, result) -> None:
     print(f"\n=== function 0x{va:08x} ===")
     print("--- before ---")
@@ -149,6 +237,10 @@ def main(argv: Optional[List[str]] = None) -> int:
             return _run_pe(args)
         if args.command == "raw":
             return _run_raw(args)
+        if args.command == "detect":
+            return _run_detect(args)
+        if args.command == "devirt":
+            return _run_devirt(args)
     except (ValueError, RuntimeError, FileNotFoundError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1

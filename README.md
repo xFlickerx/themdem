@@ -19,11 +19,15 @@ emulating both the original and the rewritten bytes with **Unicorn** and
 comparing the resulting CPU state, so a pass can never silently change program
 behaviour.
 
+It also ships a **VM-analysis / devirtualization framework** (`themdem.devirt`)
+for the *virtualization* layer — a Unicorn-based, VPC-sensitive engine that
+recovers a virtualized function's structure and, given a VM spec, lifts its
+bytecode back to readable pseudocode. See
+[Devirtualization](#devirtualization-themdemdevirt).
+
 > ⚠️ **Scope & intended use.** This is a reverse-engineering research/education
 > tool. Use it on software you are authorised to analyse — your own binaries,
-> CTF challenges, or malware inside a lab. Full *de-virtualization* (recovering
-> the original code from VM bytecode) is **not** implemented; see
-> [Devirtualization](#devirtualization-not-yet-implemented) below.
+> CTF challenges, or malware inside a lab.
 
 ## How it works
 
@@ -137,25 +141,61 @@ gated by the Unicorn validator, passing tests also demonstrate semantic
 equivalence. PE tests build a minimal in-memory PE32 fixture, so no sample
 binary is needed.
 
-## Devirtualization (not yet implemented)
+## Devirtualization (`themdem.devirt`)
 
 Recovering code from Themida's *virtualized* handlers is a harder, separate
-problem and is intentionally out of scope for this mutation-focused tool. The
-current state of the art is **Pushan** (Sudhir et al., 2026), which recovers a
-complete control-flow graph via *VPC-sensitive, constraint-free symbolic
-emulation* — uniquely labelling each basic block by `(address, VPC)`, emulating
-each block at most once to bound state growth, using an SMT solver purely as an
-expression simplifier/value enumerator (never for path feasibility), and
-"symbolizing" merged values to recover missed edges — then applying
-semantics-preserving simplifications and decompiling to C. A practical bridge
-from `themdem` would be:
+problem. `themdem.devirt` is a **VM-analysis framework** implementing the
+generic engine every devirtualizer needs, following the design of **Pushan**
+(Sudhir et al., 2026): label each basic block by `(address, VPC)`, emulate each
+such block once (bounding state growth), and un-flatten the interpreter loop
+into the original control flow.
 
-1. locate a virtualized function's VM entry and its Virtual Program Counter,
-2. recover a VPC-sensitive CFG by constraint-free symbolic emulation,
-3. run the existing `passes/` simplifications over the recovered ("flat") CFG,
-4. hand the cleaned CFG to a decompiler.
+Pipeline:
 
-Contributions in that direction are welcome.
+```
+ detect ─▶ emulate ─▶ find VPC ─▶ segment ─▶ VPC-sensitive CFG ─▶ classify ─▶ disasm+lift
+```
+
+* `detect` — static Themida version/section fingerprinting, Shannon entropy,
+  high-entropy bytecode-region ranking.
+* `emulator` — Unicorn x86-32 engine: single-steps the interpreter, snapshots
+  registers, finds the dispatch loop, and segments the trace into virtual
+  instructions.
+* `vpc` — ranks VPC candidates (pointer into bytecode + monotonic evolution).
+* `cfg` — the `(address, VPC)`-keyed CFG.
+* `vm` / `lifter` — a pluggable `VMArchitecture` spec disassembles the bytecode;
+  the lifter folds the operand stack back into pseudocode.
+
+End-to-end demo against a real (synthetic) stack VM:
+
+```bash
+python examples/devirt_demo.py
+```
+
+```
+--- virtual assembly ---        --- pseudocode ---
+0x0000:  PUSH 0xa               return (((0xa + 0x14) * 0x3) - 0x5);
+0x0005:  PUSH 0x14
+0x000a:  ADD
+...
+```
+
+CLI (static triage + analysis):
+
+```bash
+python -m themdem detect protected.exe
+python -m themdem devirt protected.exe --vm-entry 0x401000 \
+       --bytecode 0x500000:0x40 --reg esi=0x500000 --arch example --dot cfg.dot
+```
+
+**Scope.** This is a *scaffold aimed at real Themida*, not a finished Themida
+devirtualizer. The engine is proven against a synthetic x86 VM in the test
+suite; targeting a real binary additionally requires (1) locating the VM
+entry/VPC/bytecode and (2) writing a `VMArchitecture` spec for the handlers.
+The engine is currently single-path (concrete) emulation; Pushan-style
+symbolization + branch forcing (using the installed `z3`) is the main
+extension. See [`docs/DEVIRT_DESIGN.md`](docs/DEVIRT_DESIGN.md) for the full
+proven-vs-needs-a-sample breakdown.
 
 ## References & prior art
 

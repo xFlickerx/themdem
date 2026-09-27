@@ -24,7 +24,7 @@ dev = ["pytest>=7.0"]
 themdem = "themdem.cli:main"
 
 [tool.setuptools]
-packages = ["themdem", "passes"]
+packages = ["themdem", "themdem.devirt", "passes"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

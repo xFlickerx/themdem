@@ -16,8 +16,8 @@ FILE_ALIGN = 0x200
 SECT_ALIGN = 0x1000
 
 
-def build_pe32(code: bytes, entry_rva: int = SECTION_RVA) -> bytes:
-    """Return the bytes of a minimal PE32 whose ``.text`` holds ``code``."""
+def build_pe32(code: bytes, entry_rva: int = SECTION_RVA, section_name: str = ".text") -> bytes:
+    """Return the bytes of a minimal PE32 whose section holds ``code``."""
     # --- section raw data (file-aligned) ---
     raw = code + b"\x00" * ((-len(code)) % FILE_ALIGN)
     virtual_size = len(code)
@@ -66,7 +66,8 @@ def build_pe32(code: bytes, entry_rva: int = SECTION_RVA) -> bytes:
 
     # --- section header ---
     sect = bytearray(40)
-    sect[0:5] = b".text"
+    name_bytes = section_name.encode()[:8]
+    sect[0 : len(name_bytes)] = name_bytes
     struct.pack_into("<I", sect, 8, virtual_size)  # VirtualSize
     struct.pack_into("<I", sect, 12, SECTION_RVA)  # VirtualAddress
     struct.pack_into("<I", sect, 16, len(raw))  # SizeOfRawData
