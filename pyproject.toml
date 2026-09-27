@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "themdem"
+version = "0.1.0"
+description = "Educational Themida/WinLicense/Code Virtualizer mutation deobfuscator (x86-32)"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+dependencies = [
+    "capstone>=5.0",
+    "keystone-engine>=0.9.2",
+    "unicorn>=2.0",
+    "lief>=0.13",
+    "colorama>=0.4",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=7.0"]
+
+[project.scripts]
+themdem = "themdem.cli:main"
+
+[tool.setuptools]
+packages = ["themdem", "passes"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
